@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="manifest.json">
+<title>Spanish Flashcards</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--text:#17202a;--muted:#667085;--accent:#2563eb;--good:#15803d;--bad:#dc2626;--border:#d0d5dd}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.app{max-width:980px;margin:auto;padding:20px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{margin:0 0 18px;font-size:28px}.panel,.card{background:var(--card);border-radius:18px;box-shadow:0 4px 18px #00000012}
+.panel{padding:16px;margin:14px 0}.settings{display:grid;grid-template-columns:1fr auto;gap:8px}
+input,select,button{font:inherit;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--card);color:var(--text)}
+button{cursor:pointer}.primary{background:var(--accent);color:white;border-color:var(--accent)}
+.card{min-height:270px;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px;font-size:48px;font-weight:650;cursor:pointer}
+.hint{text-align:center;color:var(--muted);margin:10px}.actions{display:flex;justify-content:center;flex-wrap:wrap;gap:6px;margin:14px 0}
+.good{color:white;background:var(--good);border-color:var(--good)}.bad{color:white;background:var(--bad);border-color:var(--bad)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.stat{padding:14px;background:var(--card);border-radius:14px;text-align:center}.stat b{display:block;font-size:24px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--border)}
+.small{font-size:13px;color:var(--muted)}.hidden{display:none}
+.dark{--bg:#0f172a;--card:#1e293b;--text:#f8fafc;--muted:#94a3b8;--border:#475569}
+@media(max-width:650px){.app{padding:14px}.card{min-height:230px;font-size:38px}.stats{grid-template-columns:repeat(2,1fr)}.settings{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="top"><h1>🇪🇸 Spanish Flashcards</h1><button onclick="toggleDark()">🌙</button></div>
+
+<div class="panel settings">
+<input id="sheetUrl" placeholder="Paste your Google Apps Script Web App URL">
+<button class="primary" onclick="sync()">Sync Vocabulary</button>
+</div>
+
+<div class="panel">
+<label>Study direction:
+<select id="direction" onchange="newCard()">
+<option value="random">Random</option><option value="es">Spanish → English</option><option value="en">English → Spanish</option>
+</select></label>
+<label style="margin-left:12px">Category:
+<select id="category" onchange="newCard()"><option value="all">All</option></select></label>
+</div>
+
+<div id="card" class="card" onclick="flip()">Press Next</div>
+<div id="hint" class="hint">Tap the card or press Space to reveal the answer.</div>
+<div class="actions">
+<button onclick="newCard()">Next</button><button onclick="flip()">Flip</button>
+<button class="bad" onclick="grade(0)">✗ Missed</button><button class="good" onclick="grade(1)">✓ Correct</button>
+</div>
+
+<div class="stats">
+<div class="stat"><b id="words">0</b>Words</div>
+<div class="stat"><b id="accuracy">0%</b>Accuracy</div>
+<div class="stat"><b id="reviewed">0</b>Reviews</div>
+<div class="stat"><b id="mastered">0</b>Mastered</div>
+</div>
+
+<div class="panel">
+<input id="search" placeholder="Search vocabulary..." oninput="renderTable()" style="width:100%">
+<table><thead><tr><th>Spanish</th><th>English</th><th>Category</th><th>Correct</th><th>Missed</th></tr></thead><tbody id="table"></tbody></table>
+</div>
+
+<div class="panel">
+<h3>Add a word</h3>
+<div class="settings">
+<input id="newEs" placeholder="Spanish"><input id="newEn" placeholder="English">
+<input id="newCat" placeholder="Category"><input id="newNotes" placeholder="Notes">
+</div>
+<button class="primary" onclick="addWord()">Add Word</button>
+<button onclick="exportBackup()">Export Backup</button>
+<input type="file" id="backupFile" accept=".json" onchange="importBackup(event)">
+<p class="small">Your vocabulary and study progress are stored locally on this device. The Google Sheet is your vocabulary source.</p>
+</div>
+</div>
+
+<script>
+const KEY="spanishFlashcardsV1";
+let words=JSON.parse(localStorage.getItem(KEY)||"[]"), current=null, showing=false, side="es";
+
+function save(){localStorage.setItem(KEY,JSON.stringify(words));renderAll()}
+function renderAll(){renderStats();renderCategories();renderTable()}
+function renderStats(){
+const c=words.reduce((n,w)=>n+(w.correct||0),0), m=words.reduce((n,w)=>n+(w.missed||0),0), total=c+m;
+document.getElementById("words").textContent=words.length;
+document.getElementById("accuracy").textContent=total?Math.round(c/total*100)+"%":"0%";
+document.getElementById("reviewed").textContent=total;
+document.getElementById("mastered").textContent=words.filter(w=>(w.correct||0)>=5&&(w.correct||0)>(w.missed||0)*2).length;
+}
+function renderCategories(){
+const sel=document.getElementById("category"), old=sel.value;
+const cats=[...new Set(words.map(w=>w.category||"Uncategorized"))].sort();
+sel.innerHTML='<option value="all">All</option>'+cats.map(c=>`<option>${esc(c)}</option>`).join("");
+if(cats.includes(old))sel.value=old;
+}
+function renderTable(){
+const q=document.getElementById("search").value.toLowerCase();
+document.getElementById("table").innerHTML=words.filter(w=>(w.spanish+" "+w.english+" "+(w.category||"")).toLowerCase().includes(q))
+.map(w=>`<tr><td>${esc(w.spanish)}</td><td>${esc(w.english)}</td><td>${esc(w.category||"")}</td><td>${w.correct||0}</td><td>${w.missed||0}</td></tr>`).join("");
+}
+function pool(){
+const cat=document.getElementById("category").value;
+return words.map((w,i)=>({w,i})).filter(x=>cat==="all"||(x.w.category||"Uncategorized")===cat);
+}
+function chooseWeighted(p){
+if(!p.length)return null;
+const weights=p.map(x=>1+Math.min(20,(x.w.missed||0)*3)+Math.max(0,5-(x.w.correct||0)));
+let r=Math.random()*weights.reduce((a,b)=>a+b,0);
+for(let i=0;i<p.length;i++){r-=weights[i];if(r<=0)return p[i]}return p[p.length-1];
+}
+function newCard(){
+const pick=chooseWeighted(pool()); if(!pick){document.getElementById("card").textContent="Add or sync some words";current=null;return}
+current=pick.i; showing=false;
+const d=document.getElementById("direction").value;
+side=d==="random"?(Math.random()<.5?"es":"en"):d;
+document.getElementById("card").textContent=side==="es"?words[current].spanish:words[current].english;
+}
+function flip(){if(current===null)return;showing=!showing;const w=words[current];document.getElementById("card").textContent=showing?(side==="es"?w.english:w.spanish):(side==="es"?w.spanish:w.english)}
+function grade(ok){if(current===null)return;ok?words[current].correct=(words[current].correct||0)+1:words[current].missed=(words[current].missed||0)+1;words[current].lastReviewed=new Date().toISOString();save();newCard()}
+function addWord(){
+const s=newEs.value.trim(),e=newEn.value.trim();if(!s||!e)return;
+const existing=words.find(w=>w.spanish.toLowerCase()===s.toLowerCase());
+if(existing){existing.english=e;existing.category=newCat.value.trim();existing.notes=newNotes.value.trim()}else words.push({spanish:s,english:e,category:newCat.value.trim(),notes:newNotes.value.trim(),correct:0,missed:0});
+newEs.value=newEn.value=newCat.value=newNotes.value="";save();
+}
+async function sync(){
+const url=document.getElementById("sheetUrl").value.trim();if(!url){alert("Paste your Apps Script Web App URL first.");return}
+try{const data=await fetch(url).then(r=>r.json());let added=0,updated=0;
+data.forEach(n=>{if(!n.spanish||!n.english)return;let w=words.find(x=>x.spanish.toLowerCase()===String(n.spanish).toLowerCase());
+if(w){if(w.english!==n.english||w.category!==(n.category||"")||w.notes!==(n.notes||"")){w.english=n.english;w.category=n.category||"";w.notes=n.notes||"";updated++}}else{words.push({spanish:String(n.spanish),english:String(n.english),category:n.category||"",notes:n.notes||"",correct:0,missed:0});added++}});
+localStorage.sheetUrl=url;save();alert(`Sync complete\n${added} new words\n${updated} updated words`)}catch(e){alert("Sync failed. Check the Web App URL and its access setting.")}
+}
+function exportBackup(){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(words,null,2)],{type:"application/json"}));a.download="SpanishFlashcardsBackup.json";a.click()}
+function importBackup(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{words=JSON.parse(r.result);save();newCard()}catch{alert("Invalid backup file")}};r.readAsText(f)}
+function toggleDark(){document.body.classList.toggle("dark");localStorage.dark=document.body.classList.contains("dark")}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+document.addEventListener("keydown",e=>{if(e.code==="Space"){e.preventDefault();flip()}else if(e.key.toLowerCase()==="n")newCard();else if(e.key==="1")grade(0);else if(e.key==="2")grade(1)});
+if(localStorage.sheetUrl)document.getElementById("sheetUrl").value=localStorage.sheetUrl;
+if(localStorage.dark==="true")document.body.classList.add("dark");
+renderAll();newCard();
+if("serviceWorker"in navigator)navigator.serviceWorker.register("service-worker.js").catch(()=>{});
+</script>
+</body>
+</html>
